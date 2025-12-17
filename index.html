@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Automated Deadlock Detector — Visual + Simulation + Export</title>
+
+<!-- Cytoscape CDN -->
+<script src="https://unpkg.com/cytoscape@3.23.0/dist/cytoscape.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#061227; --card:#071728; --muted:#9fb0c8; --accent:#7c5cff; --accent2:#3ddc97;
+    --glass: rgba(255,255,255,0.04); --glass-2: rgba(255,255,255,0.02);
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#061227 0%, #041125 100%);font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#e6eef8}
+  .container{max-width:1200px;margin:20px auto;padding:16px;display:grid;grid-template-columns:360px 1fr;gap:18px}
+  .card{background:linear-gradient(180deg,var(--card), rgba(8,12,20,0.85));border-radius:12px;padding:14px;box-shadow:0 8px 28px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.03)}
+  h1{margin:0;font-size:18px}
+  p.lead{margin:6px 0 12px;color:var(--muted);font-size:13px}
+  label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+  input,select{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit;outline:none}
+  .row{display:flex;gap:8px}
+  button{background:linear-gradient(90deg,var(--accent),#5b7bff);color:white;border:0;padding:8px 12px;border-radius:10px;font-weight:600;cursor:pointer}
+  button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+  button.ghost{background:transparent;color:var(--muted);border:0}
+  button.small{padding:6px 8px;font-size:13px}
+  .muted{color:var(--muted);font-size:13px}
+  .controls{display:flex;gap:8px;align-items:center}
+  .entities{margin-top:12px;display:grid;gap:8px;max-height:300px;overflow:auto}
+  .entity{display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:8px;background:var(--glass-2);border:1px solid rgba(255,255,255,0.02)}
+  .tag{padding:6px 8px;border-radius:999px;background:rgba(255,255,255,0.03);font-size:12px}
+  .right-grid{display:grid;grid-template-rows:64px 1fr 260px;gap:12px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .stats{display:flex;gap:10px;align-items:center}
+  .stat{display:flex;flex-direction:column;align-items:center;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:10px}
+  .stat .value{font-weight:700;font-size:16px}
+  #cy{width:100%;height:100%;border-radius:10px;background:linear-gradient(180deg, rgba(10,18,32,0.6), rgba(6,12,20,0.7));border:1px solid rgba(255,255,255,0.02)}
+  .report{height:100%;overflow:auto;padding:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:8px}
+  pre{white-space:pre-wrap;margin:0;background:transparent;border:0;color:var(--muted)}
+  .sim-controls{display:flex;align-items:center;gap:8px}
+  input[type=range]{width:140px}
+  .footer{margin-top:10px;color:var(--muted);text-align:center;font-size:13px}
+  @media(max-width:980px){.container{grid-template-columns:1fr; padding:12px}}
+</style>
+</head>
+<body>
+  <div class="container">
+    <!-- LEFT: Controls -->
+    <div class="card">
+      <h1>Automated Deadlock Detector</h1>
+      <p class="lead">Now with **step-through simulation** and **graph export**. Load the sample and play to see a deadlock form.</p>
+
+      <div>
+        <label>New Process</label>
+        <div class="row">
+          <input id="procName" placeholder="e.g. P1" />
+          <button id="addProcBtn" class="small">Add</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>New Resource</label>
+        <div class="row">
+          <input id="resName" placeholder="e.g. R1" />
+          <input id="resCount" type="number" min="1" value="1" style="width:86px" />
+          <button id="addResBtn" class="small">Add</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <label>Action (Allocate / Request / Release)</label>
+        <div style="display:grid;gap:8px">
+          <div class="row">
+            <select id="selProc"></select>
+            <select id="selRes"></select>
+            <input id="count" type="number" min="1" value="1" style="width:80px" />
+          </div>
+          <div class="row">
+            <button id="allocBtn" class="small">Allocate</button>
+            <button id="reqBtn" class="small secondary">Request</button>
+            <button id="relBtn" class="small secondary">Release</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Graph View</label>
+        <div class="row">
+          <button id="viewRAG" class="small">RAG</button>
+          <button id="viewWFG" class="small secondary">WFG</button>
+          <button id="detectBtn" class="small" style="margin-left:auto">Detect</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Simulation</label>
+        <div class="sim-controls">
+          <button id="playBtn" class="small">Play ▶</button>
+          <button id="pauseBtn" class="small secondary">Pause ⏸</button>
+          <button id="stepBtn" class="small secondary">Step →</button>
+          <button id="resetBtn" class="small secondary">Reset ↺</button>
+          <div style="margin-left:6px" class="muted">Speed</div>
+          <input id="speed" type="range" min="1" max="4" value="2" />
+        </div>
+        <div style="margin-top:6px" class="muted">Script: <span id="simIndex">0</span>/<span id="simTotal">0</span></div>
+        <div style="margin-top:8px" class="row">
+          <button id="loadScriptBtn" class="small">Load Demo Script</button>
+          <button id="editScriptBtn" class="small secondary">Edit Script</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="row">
+          <button id="sampleBtn" class="small" style="background:linear-gradient(90deg,#ffb86b,#ff9e57)">Load Sample</button>
+          <button id="exportBtn" class="small secondary">Export JSON</button>
+          <button id="importBtn" class="small secondary">Import JSON</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Graph Export</label>
+        <div class="row">
+          <button id="exportPNG" class="small">Download PNG</button>
+          <button id="exportSVG" class="small secondary">Download SVG</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Entities</label>
+        <div class="entities" id="entitiesList"></div>
+      </div>
+
+      <div class="footer">Tip: use the demo script to play the sequence that leads to deadlock.</div>
+    </div>
+
+    <!-- RIGHT: Graph + Tables + Report -->
+    <div class="right-grid">
+      <div class="card topbar">
+        <div class="stats">
+          <div class="stat"><div class="muted">Processes</div><div class="value" id="countP">0</div></div>
+          <div class="stat"><div class="muted">Resources</div><div class="value" id="countR">0</div></div>
+          <div class="stat"><div class="muted">Status</div><div class="value" id="status">—</div></div>
+        </div>
+        <div class="controls">
+          <div class="muted">View:</div>
+          <div id="viewLabel" class="tag">RAG</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:10px;display:flex;gap:10px;align-items:stretch">
+        <div id="cy" style="width:100%;height:420px"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <div class="muted" style="margin-bottom:6px">Resources</div>
+            <div class="report" id="resBox"><pre>No resources</pre></div>
+          </div>
+          <div>
+            <div class="muted" style="margin-bottom:6px">Processes</div>
+            <div class="report" id="procBox"><pre>No processes</pre></div>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="muted" style="margin-bottom:6px">Detection Report</div>
+          <div class="report" id="reportBox"><pre>No detection yet.</pre></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ========= Model ========= */
+const state = {
+  processes: new Set(),
+  resources: {},
+  alloc: {},
+  requests: {},
+};
+
+/* ========= Simulation state ========= */
+let simScript = [];            // array of actions
+let simIndex = 0;             // next action index to apply
+let simPlaying = false;
+let simTimer = null;
+let simSnapshot = null;       // snapshot taken before simulation (for reset)
+const $ = id => document.getElementById(id);
+const setText = (id, txt) => $(id).textContent = txt;
+
+/* ========= Helpers (same as before) ========= */
+function addProcess(name){ if(!name) return; state.processes.add(name); state.alloc[name]=state.alloc[name]||{}; state.requests[name]=state.requests[name]||{}; renderAll(); }
+function removeProcess(name){ if(!state.processes.has(name)) return; state.processes.delete(name); delete state.alloc[name]; delete state.requests[name]; for(const r of Object.keys(state.resources||{})) delete state.resources[r].allocated?.[name]; renderAll(); }
+function addResource(rname, total=1){ if(!rname) return; state.resources[rname]=state.resources[rname]||{total:total, allocated:{}}; state.resources[rname].total=total; renderAll(); }
+function removeResource(rname){ delete state.resources[rname]; for(const p of Array.from(state.processes)){ delete state.alloc[p]?.[rname]; delete state.requests[p]?.[rname]; } renderAll(); }
+function available(rname){ const r=state.resources[rname]; if(!r) return 0; const used=Object.values(r.allocated||{}).reduce((a,b)=>a+b,0); return r.total-used; }
+function allocate(proc,rname,cnt=1){ if(!state.processes.has(proc)) addProcess(proc); if(!(rname in state.resources)){ alert("Resource doesn't exist"); return false; } if(available(rname)<cnt) return false; state.resources[rname].allocated[proc]=(state.resources[rname].allocated[proc]||0)+cnt; state.alloc[proc][rname]=(state.alloc[proc][rname]||0)+cnt; if(state.requests[proc]&&state.requests[proc][rname]){ state.requests[proc][rname]=Math.max(0,state.requests[proc][rname]-cnt); if(state.requests[proc][rname]===0) delete state.requests[proc][rname]; } renderAll(); return true; }
+function request(proc,rname,cnt=1){ if(!state.processes.has(proc)) addProcess(proc); if(!(rname in state.resources)){ alert("Resource doesn't exist"); return false; } if(available(rname)>=cnt){ allocate(proc,rname,cnt); return true; } else { state.requests[proc][rname]=(state.requests[proc][rname]||0)+cnt; renderAll(); return false; } }
+function release(proc,rname,cnt=1){ if(!(rname in state.resources)){ alert("Resource doesn't exist"); return false; } const held = state.alloc[proc]?.[rname]||0; if(held < cnt) return false; state.alloc[proc][rname]=held-cnt; if(state.alloc[proc][rname]===0) delete state.alloc[proc][rname]; state.resources[rname].allocated[proc]=(state.resources[rname].allocated[proc]||0)-cnt; if(state.resources[rname].allocated[proc]===0) delete state.resources[rname].allocated[proc]; renderAll(); return true; }
+
+/* ========= Detection ========= */
+function buildWFG(){ const wfg={}; for(const p of state.processes) wfg[p]=new Set(); for(const p of state.processes){ const reqs = state.requests[p]||{}; for(const [rname,cnt] of Object.entries(reqs)){ if(cnt<=0) continue; const res = state.resources[rname]; if(!res) continue; for(const [holder,hcnt] of Object.entries(res.allocated||{})){ if(hcnt>0 && holder!==p) wfg[p].add(holder); } } } return wfg; }
+
+function detectCyclesInAdj(adj){
+  const visited={}; const stack=new Set(); const cycles=[];
+  function dfs(u,path){ visited[u]=1; stack.add(u); path.push(u); for(const v of (adj[u]||[])){ if(!visited[v]) dfs(v,path); else if(stack.has(v)){ const idx = path.indexOf(v); if(idx>=0) cycles.push(path.slice(idx)); } } stack.delete(u); path.pop(); visited[u]=2; }
+  for(const node of Object.keys(adj)) if(!visited[node]) dfs(node,[]);
+  const uniq=[]; const seen=new Set();
+  for(const c of cycles){ const key=[...new Set(c)].sort().join(','); if(!seen.has(key)){ seen.add(key); uniq.push([...new Set(c)]); } }
+  return uniq;
+}
+function detectWFGCycles(){ const wfg = buildWFG(); const adj={}; for(const [u,s] of Object.entries(wfg)) adj[u]=Array.from(s); return detectCyclesInAdj(adj); }
+function detectMultiInstance(){ const procs=[...state.processes]; const resNames=Object.keys(state.resources); const avail={}; resNames.forEach(r=>avail[r]=available(r)); const alloc={}; const req={}; for(const p of procs){ alloc[p]={}; req[p]={}; for(const r of resNames){ alloc[p][r]=state.alloc[p]?.[r]||0; req[p][r]=state.requests[p]?.[r]||0; } } const finish={}; procs.forEach(p=>finish[p]=false); let changed=true; while(changed){ changed=false; for(const p of procs){ if(finish[p]) continue; let can=true; for(const r of resNames) if(req[p][r] > avail[r]) { can=false; break; } if(can){ for(const r of resNames) avail[r]+=alloc[p][r]; finish[p]=true; changed=true; } } } return procs.filter(p=>!finish[p]); }
+
+/* ========= Cytoscape ========== */
+let cy = null;
+let currentView = 'RAG';
+
+function makeElementsForRAG(){
+  const nodes=[]; const edges=[];
+  for(const p of [...state.processes]) nodes.push({ data:{ id:'P:'+p, label:p, type:'process' }});
+  for(const [r,info] of Object.entries(state.resources)){ nodes.push({ data:{ id:'R:'+r, label:r+' ('+info.total+')', type:'resource', total:info.total }});
+    for(const [holder,cnt] of Object.entries(info.allocated||{})) if(cnt>0) edges.push({ data:{ id:`e_R${r}_to_P${holder}`, source:'R:'+r, target:'P:'+holder, rel:'allocated', label:`${cnt}` }});
+  }
+  for(const p of [...state.processes]) for(const [rname,cnt] of Object.entries(state.requests[p]||{})) if(cnt>0) edges.push({ data:{ id:`e_P${p}_to_R${rname}`, source:'P:'+p, target:'R:'+rname, rel:'requested', label:`${cnt}` }});
+  return nodes.concat(edges);
+}
+function makeElementsForWFG(){
+  const nodes=[]; const edges=[];
+  for(const p of [...state.processes]) nodes.push({ data:{ id:p, label:p, type:'process' }});
+  const wfg = buildWFG();
+  for(const [p,s] of Object.entries(wfg)) for(const q of Array.from(s)) edges.push({ data:{ id:`e_${p}_to_${q}`, source:p, target:q, rel:'waits' }});
+  return nodes.concat(edges);
+}
+
+function initCy(){ if(cy) { cy.destroy(); cy=null; } cy = cytoscape({ container: document.getElementById('cy'), elements: [], style:[
+  { selector:'node[type="process"]', style:{ 'background-color':'#4cc1ff','label':'data(label)','color':'#012','text-valign':'center','text-halign':'center','font-weight':'600','width':'48px','height':'48px','shape':'roundrectangle' } },
+  { selector:'node[type="resource"]', style:{ 'background-color':'#ffd66b','label':'data(label)','color':'#061217','text-valign':'center','text-halign':'center','font-weight':'700','width':'58px','height':'42px','shape':'ellipse' } },
+  { selector:'edge[rel="allocated"]', style:{ 'width':3,'line-color':'#cfa700','target-arrow-color':'#cfa700','target-arrow-shape':'triangle','curve-style':'bezier','label':'data(label)','font-size':'10px' } },
+  { selector:'edge[rel="requested"]', style:{ 'width':2,'line-style':'dashed','line-color':'#7c5cff','target-arrow-color':'#7c5cff','target-arrow-shape':'triangle','curve-style':'bezier','label':'data(label)','font-size':'10px' } },
+  { selector:'edge[rel="waits"]', style:{ 'width':3,'line-color':'#ff7a7a','target-arrow-shape':'triangle','curve-style':'bezier' } },
+  { selector:'.highlight', style:{ 'background-color':'#ff6b6b','line-color':'#ff6b6b','target-arrow-color':'#ff6b6b' } },
+  { selector:'node:selected', style:{ 'border-width':3,'border-color':'#fff' } }
+], layout:{ name:'cose', idealEdgeLength:80, nodeOverlap:20, refresh:20 } });
+
+  cy.on('tap','node', e => { const d = e.target.data(); showNodeDetails(d); });
+}
+
+function renderGraph(){ if(!cy) initCy(); cy.elements().remove(); const elements = currentView==='RAG' ? makeElementsForRAG() : makeElementsForWFG(); cy.add(elements); const layout = cy.layout({ name:'cose', idealEdgeLength:80, nodeOverlap:20, refresh:20 }); layout.run(); }
+
+/* ========= Highlight cycles ========== */
+function highlightCycles(){
+  cy.nodes().removeClass('highlight'); cy.edges().removeClass('highlight');
+  if(currentView === 'WFG'){
+    const cycles = detectWFGCycles();
+    if(cycles.length){
+      cycles.forEach(cyc => { cyc.forEach(p => { const n=cy.$(`#${CSS.escape(p)}`); if(n) n.addClass('highlight'); }); });
+      cycles.forEach(cyc => { for(let i=0;i<cyc.length;i++){ const a=cyc[i], b=cyc[(i+1)%cyc.length]; const e = cy.edges().filter(edge => edge.data('source')===a && edge.data('target')===b); e.addClass('highlight'); } });
+    }
+    return cycles;
+  } else {
+    const adj = {}; cy.nodes().forEach(n => adj[n.id()] = []); cy.edges().forEach(e => { adj[e.data('source')] = adj[e.data('source')]||[]; adj[e.data('source')].push(e.data('target')); });
+    const cycles = detectCyclesInAdj(adj);
+    if(cycles.length){
+      cycles.forEach(cyc => { cyc.forEach(id => { const n=cy.$(`#${CSS.escape(id)}`); if(n) n.addClass('highlight'); }); });
+      cycles.forEach(cyc => { for(let i=0;i<cyc.length;i++){ const a=cyc[i], b=cyc[(i+1)%cyc.length]; const e = cy.edges().filter(edge => edge.data('source')===a && edge.data('target')===b); e.addClass('highlight'); } });
+    }
+    return cycles;
+  }
+}
+
+/* ========= UI Rendering ========= */
+function renderAll(){
+  const selP = $('selProc'), selR = $('selRes'); selP.innerHTML=''; selR.innerHTML='';
+  for(const p of [...state.processes].sort()){ const o=document.createElement('option'); o.value=p; o.textContent=p; selP.appendChild(o); }
+  for(const r of Object.keys(state.resources).sort()){ const o=document.createElement('option'); o.value=r; o.textContent=r; selR.appendChild(o); }
+
+  const el = $('entitiesList'); el.innerHTML='';
+  for(const p of [...state.processes].sort()){
+    const div = document.createElement('div'); div.className='entity'; const alloc=formatObj(state.alloc[p]); const req=formatObj(state.requests[p]);
+    div.innerHTML = `<div><strong>${p}</strong><div class="muted">alloc: ${alloc} • req: ${req}</div></div><div><button class="small secondary" onclick="removeProcessPrompt('${p}')">Remove</button></div>`;
+    el.appendChild(div);
+  }
+  for(const r of Object.keys(state.resources).sort()){
+    const res = state.resources[r];
+    const div = document.createElement('div'); div.className='entity';
+    div.innerHTML = `<div><strong>${r}</strong><div class="muted">total:${res.total} • allocated:${formatObj(res.allocated)}</div></div><div><button class="small secondary" onclick="removeResourcePrompt('${r}')">Remove</button></div>`;
+    el.appendChild(div);
+  }
+
+  setText('countP', [...state.processes].length);
+  setText('countR', Object.keys(state.resources).length);
+  $('resBox').innerHTML = `<pre>${prettyResources()}</pre>`;
+  $('procBox').innerHTML = `<pre>${prettyProcesses()}</pre>`;
+  $('reportBox').innerHTML = `<pre>No detection yet.</pre>`;
+  renderGraph();
+}
+
+/* ========= Pretty format ========= */
+function formatObj(o){ return Object.entries(o||{}).map(([k,v])=>`${k}:${v}`).join(', ') || '-' }
+function prettyResources(){ if(Object.keys(state.resources).length===0) return 'No resources'; return Object.entries(state.resources).map(([r,info])=> `${r}: total=${info.total}, allocated=${formatObj(info.allocated)}`).join('\n'); }
+function prettyProcesses(){ if([...state.processes].length===0) return 'No processes'; return [...state.processes].sort().map(p=>`${p}: alloc=${formatObj(state.alloc[p])} req=${formatObj(state.requests[p])}`).join('\n'); }
+window.removeProcessPrompt = (p) => { if(!confirm(`Remove ${p}?`)) return; removeProcess(p); };
+window.removeResourcePrompt = (r) => { if(!confirm(`Remove ${r}?`)) return; removeResource(r); };
+
+/* ========= Wiring ========= */
+$('addProcBtn').addEventListener('click', ()=>{ const v=$('procName').value.trim(); if(!v) return alert('Enter process name'); addProcess(v); $('procName').value=''; });
+$('addResBtn').addEventListener('click', ()=>{ const r=$('resName').value.trim(); const c=Math.max(1,parseInt($('resCount').value||1)); if(!r) return alert('Enter resource name'); addResource(r,c); $('resName').value=''; });
+$('allocBtn').addEventListener('click', ()=>{ const p=$('selProc').value, r=$('selRes').value, c=Math.max(1,parseInt($('count').value||1)); if(!p||!r) return alert('Select process & resource'); if(allocate(p,r,c)) alert('Allocated'); else alert('Allocation failed'); });
+$('reqBtn').addEventListener('click', ()=>{ const p=$('selProc').value, r=$('selRes').value, c=Math.max(1,parseInt($('count').value||1)); if(!p||!r) return alert('Select process & resource'); const ok=request(p,r,c); alert(ok ? 'Allocated immediately' : 'Request recorded'); });
+$('relBtn').addEventListener('click', ()=>{ const p=$('selProc').value, r=$('selRes').value, c=Math.max(1,parseInt($('count').value||1)); if(!p||!r) return alert('Select process & resource'); const ok=release(p,r,c); alert(ok ? 'Released' : 'Release failed'); });
+$('viewRAG').addEventListener('click', ()=>{ currentView='RAG'; $('viewLabel').textContent='RAG'; $('viewRAG').classList.remove('secondary'); $('viewWFG').classList.add('secondary'); renderGraph(); });
+$('viewWFG').addEventListener('click', ()=>{ currentView='WFG'; $('viewLabel').textContent='WFG'; $('viewWFG').classList.remove('secondary'); $('viewRAG').classList.add('secondary'); renderGraph(); });
+$('detectBtn').addEventListener('click', ()=> runDetection());
+$('sampleBtn').addEventListener('click', ()=>{ loadSample(); renderAll(); setTimeout(()=>runDetection(),300); });
+$('exportBtn').addEventListener('click', ()=>{ const txt = JSON.stringify(exportSnapshot(),null,2); prompt('Copy scenario JSON', txt); });
+$('importBtn').addEventListener('click', ()=>{ const txt = prompt('Paste scenario JSON'); if(!txt) return; try{ importSnapshot(JSON.parse(txt)); renderAll(); } catch(e){ alert('Invalid JSON: '+e.message); } });
+
+/* ========= Export functions ========= */
+$('exportPNG').addEventListener('click', ()=> {
+  if(!cy) return alert('Graph not ready');
+  // PNG (high quality)
+  const pngData = cy.png({ full:true, scale:2 });
+  downloadDataURL(pngData, `deadlock_graph_${Date.now()}.png`);
+});
+$('exportSVG').addEventListener('click', ()=> {
+  if(!cy) return alert('Graph not ready');
+  const svgData = cy.svg({ scale:1 });
+  // svgData is an XML string; create blob
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download = `deadlock_graph_${Date.now()}.svg`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+function downloadDataURL(dataURL, filename){
+  const a = document.createElement('a'); a.href = dataURL; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ========= Simulation: apply/undo/step ========= */
+/* Action format examples:
+   { type: 'addProcess', proc: 'P1' }
+   { type: 'addResource', res: 'R1', total: 2 }
+   { type: 'allocate', proc: 'P1', res: 'R1', count: 1 }
+   { type: 'request', proc:'P2', res:'R1', count:1 }
+   { type: 'release', proc:'P1', res:'R1', count:1 }
+*/
+function takeSnapshot(){ simSnapshot = exportSnapshot(); }
+function restoreSnapshot(){ if(!simSnapshot) return; importSnapshot(simSnapshot); simIndex = 0; updateSimUI(); renderAll(); }
+
+function applyAction(action){
+  const t = action.type;
+  if(t === 'addProcess') addProcess(action.proc);
+  else if(t === 'removeProcess') removeProcess(action.proc);
+  else if(t === 'addResource') addResource(action.res, action.total || 1);
+  else if(t === 'removeResource') removeResource(action.res);
+  else if(t === 'allocate') allocate(action.proc, action.res, action.count || 1);
+  else if(t === 'request') request(action.proc, action.res, action.count || 1);
+  else if(t === 'release') release(action.proc, action.res, action.count || 1);
+  else console.warn('Unknown action', action);
+}
+
+function loadScript(script){
+  simScript = script || [];
+  simIndex = 0;
+  updateSimUI();
+  takeSnapshot();
+}
+
+function stepForward(){
+  if(simIndex >= simScript.length) { pauseSimulation(); return; }
+  const action = simScript[simIndex];
+  applyAction(action);
+  simIndex++;
+  updateSimUI();
+  // after each step, update graph highlights
+  setTimeout(()=>{ renderGraph(); highlightCycles(); }, 120);
+}
+
+function playSimulation(){
+  if(simPlaying) return;
+  if(simIndex >= simScript.length) { // restart from beginning
+    restoreSnapshot();
+  }
+  simPlaying = true;
+  const speed = parseInt($('speed').value || 2);
+  const interval = 1000 / speed;
+  simTimer = setInterval(()=>{
+    if(simIndex < simScript.length) stepForward();
+    else pauseSimulation();
+  }, interval);
+  $('playBtn').textContent = 'Playing ▶';
+}
+function pauseSimulation(){ simPlaying = false; if(simTimer) { clearInterval(simTimer); simTimer=null; } $('playBtn').textContent = 'Play ▶'; }
+function resetSimulation(){ pauseSimulation(); restoreSnapshot(); simIndex = 0; updateSimUI(); renderAll(); }
+
+function updateSimUI(){ setText('simIndex', simIndex); setText('simTotal', simScript.length); }
+
+/* ========= Simulation sample script ========= */
+const demoScript = [
+  { type:'addProcess', proc:'P1' }, { type:'addProcess', proc:'P2' },
+  { type:'addResource', res:'R1', total:1 }, { type:'addResource', res:'R2', total:1 },
+  { type:'allocate', proc:'P1', res:'R1', count:1 }, { type:'allocate', proc:'P2', res:'R2', count:1 },
+  { type:'request', proc:'P1', res:'R2', count:1 }, // P1 waiting for R2
+  { type:'request', proc:'P2', res:'R1', count:1 }  // P2 waiting for R1 -> deadlock
+];
+
+$('loadScriptBtn').addEventListener('click', ()=>{ loadScript(demoScript); restoreSnapshot(); alert('Demo script loaded. Press Play to simulate.'); });
+$('editScriptBtn').addEventListener('click', ()=> {
+  const txt = prompt('Edit script JSON (array of actions)', JSON.stringify(simScript.length?simScript:demoScript, null, 2));
+  if(!txt) return;
+  try{ const arr = JSON.parse(txt); loadScript(arr); alert('Script loaded'); } catch(e){ alert('Invalid JSON: '+e.message); }
+});
+
+$('playBtn').addEventListener('click', ()=> { if(!simScript.length) { if(confirm('No script loaded — load demo script?')) { loadScript(demoScript); restoreSnapshot(); } else return; } playSimulation(); });
+$('pauseBtn').addEventListener('click', ()=> pauseSimulation());
+$('stepBtn').addEventListener('click', ()=> { if(!simScript.length) { loadScript(demoScript); restoreSnapshot(); } stepForward(); });
+$('resetBtn').addEventListener('click', ()=> resetSimulation());
+$('speed').addEventListener('input', ()=> { if(simPlaying){ pauseSimulation(); playSimulation(); } });
+
+function exportSnapshot(){ return { processes:[...state.processes], resources: Object.fromEntries(Object.entries(state.resources).map(([k,v])=>[k,{total:v.total,allocated:v.allocated}])), alloc: state.alloc, requests: state.requests }; }
+function importSnapshot(snap){ state.processes = new Set(snap.processes || []); state.resources = {}; for(const [r,info] of Object.entries(snap.resources||{})) state.resources[r] = { total: info.total||1, allocated: info.allocated||{} }; state.alloc = snap.alloc || {}; state.requests = snap.requests || {}; }
+
+/* ========= Run detection & highlight ========= */
+function runDetection(){
+  const cyclesWFG = detectWFGCycles();
+  const multiDead = detectMultiInstance();
+  const report = [];
+  if(cyclesWFG.length){ report.push('WFG cycles detected:'); cyclesWFG.forEach((c,i)=>report.push(`  #${i+1}: ${c.join(' -> ')}`)); } else report.push('No cycle in WFG.');
+  if(multiDead.length) report.push('', `Multi-instance detection: processes possibly deadlocked: ${multiDead.join(', ')}`); else report.push('', 'No deadlock detected by multi-instance detection.');
+  const involved = new Set(); cyclesWFG.forEach(c=>c.forEach(p=>involved.add(p))); multiDead.forEach(p=>involved.add(p));
+  if(involved.size){ const arr=[...involved]; const v = suggestVictim(arr); if(v) report.push('', `Suggestion: Abort '${v.victim}' (holds ${v.held} resources).`); setText('status','DEADLOCK'); } else { report.push('', 'System SAFE — no action required.'); setText('status','SAFE'); }
+  $('reportBox').innerHTML = `<pre>${report.join('\n')}</pre>`;
+  // highlight cycles on graph
+  const cycles = highlightCycles();
+  if(cycles && cycles.length){ const ids = new Set(); cycles.forEach(c=>c.forEach(x=>ids.add(currentView==='RAG'?x:x))); const eles = cy.elements().filter(el => ids.has(el.id())); if(eles.length) cy.fit(eles, 50); }
+}
+
+/* ========= Suggest victim ========= */
+function suggestVictim(list){ if(!list||list.length===0) return null; let victim=list[0], minAlloc=Infinity; for(const p of list){ const totalAlloc = Object.values(state.alloc[p]||{}).reduce((a,b)=>a+b,0); if(totalAlloc<minAlloc){ minAlloc=totalAlloc; victim=p; } } return {victim, held:minAlloc}; }
+
+/* ========= Node details ========= */
+function showNodeDetails(d){ if(!d) return; if(currentView==='RAG'){ if(d.id.startsWith('P:')){ const p = d.id.slice(2); $('procBox').innerHTML = `<pre>${p}: alloc=${formatObj(state.alloc[p])} req=${formatObj(state.requests[p])}</pre>`; } else if(d.id.startsWith('R:')){ const r = d.id.slice(2); $('resBox').innerHTML = `<pre>${r}: total=${state.resources[r].total}, allocated=${formatObj(state.resources[r].allocated)}</pre>`; } } else { const p = d.id; $('procBox').innerHTML = `<pre>${p}: alloc=${formatObj(state.alloc[p])} req=${formatObj(state.requests[p])}</pre>`; } }
+
+/* ========= Init ========= */
+function formatObj(o){ return Object.entries(o||{}).map(([k,v])=>`${k}:${v}`).join(', ') || '-' }
+function initDemoState(){ /* empty initial state */ state.processes = new Set(); state.resources = {}; state.alloc = {}; state.requests = {}; }
+
+initCy();
+initDemoState();
+renderAll();
+takeSnapshot(); // snapshot initial empty state
+updateSimUI();
+
+/* ensure graph resizes nicely after load */
+setTimeout(()=>{ renderGraph(); }, 200);
+</script>
+</body>
+</html>
